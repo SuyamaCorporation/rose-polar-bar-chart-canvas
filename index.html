@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rose / Polar Bar Chart Generator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
+  canvas { display: block; border-radius: 12px; cursor: crosshair; }
+  input[type=range] { accent-color: #38bdf8; }
+  input[type=text], input[type=number] { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 100%; }
+  table { width: 100%; border-collapse: collapse; }
+  th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 6px; text-align: left; }
+  td { padding: 3px 4px; }
+  .delete-btn { background: #7f1d1d; color: #fca5a5; border: none; border-radius: 3px; padding: 2px 7px; cursor: pointer; font-size: 11px; }
+  .delete-btn:hover { background: #991b1b; }
+  select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px; }
+</style>
+</head>
+<body class="min-h-screen p-4">
+<div class="max-w-5xl mx-auto">
+  <h1 class="text-2xl font-bold text-sky-300 mb-1">Rose / Polar Bar Chart Generator</h1>
+  <p class="text-slate-500 text-sm mb-4">Polar area chart — each segment's radius represents its value</p>
+
+  <div class="flex flex-wrap gap-6 items-start">
+    <!-- Canvas -->
+    <div>
+      <canvas id="roseCanvas" width="480" height="480" aria-label="Rose polar bar chart"></canvas>
+      <div class="mt-2 flex gap-2">
+        <button onclick="exportSVG()" class="bg-sky-700 hover:bg-sky-600 text-white px-4 py-1.5 rounded text-sm font-bold" aria-label="Export SVG">Export SVG</button>
+        <button onclick="loadSample('rainfall')" class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm" aria-label="Load rainfall sample">Rainfall</button>
+        <button onclick="loadSample('compass')" class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-sm" aria-label="Load compass sample">Compass</button>
+      </div>
+    </div>
+
+    <!-- Controls + Data table -->
+    <div class="flex-1 min-w-[260px] space-y-4">
+      <!-- Chart controls -->
+      <div class="bg-slate-800 rounded-lg p-4 space-y-3">
+        <div>
+          <label for="innerRadius" class="text-sm text-sky-300 block mb-1">Inner Radius: <span id="innerRadiusVal">20</span>px</label>
+          <input type="range" id="innerRadius" min="0" max="100" value="20" aria-label="Inner radius" oninput="draw()">
+        </div>
+        <div>
+          <label for="colorScheme" class="text-sm text-sky-300 block mb-1">Color Scheme</label>
+          <select id="colorScheme" onchange="draw()" aria-label="Color scheme">
+            <option value="neon">Neon</option>
+            <option value="ocean">Ocean</option>
+            <option value="sunset">Sunset</option>
+            <option value="forest">Forest</option>
+            <option value="mono">Monochrome</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="checkbox" id="clockwise" onchange="draw()" checked aria-label="Clockwise direction">
+          <label for="clockwise" class="text-sm text-slate-300">Clockwise</label>
+        </div>
+      </div>
+
+      <!-- Data table -->
+      <div class="bg-slate-800 rounded-lg p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-sm text-sky-300">Data Points (max 12)</span>
+          <button onclick="addRow()" class="bg-sky-700 hover:bg-sky-600 text-white px-3 py-1 rounded text-xs" aria-label="Add data row">+ Add</button>
+        </div>
+        <table>
+          <thead><tr><th>Label</th><th>Value</th><th></th></tr></thead>
+          <tbody id="dataBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+const COLOR_SCHEMES = {
+  neon: ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#c77dff','#ff9f43','#48dbfb','#ff6b9d','#a29bfe','#fd79a8','#00b894','#fdcb6e'],
+  ocean: ['#0077b6','#0096c7','#00b4d8','#48cae4','#90e0ef','#ade8f4','#023e8a','#03045e','#caf0f8','#0077b6','#48cae4','#ade8f4'],
+  sunset: ['#ff4800','#ff6d00','#ff9100','#ffb500','#ffd400','#f72585','#b5179e','#7209b7','#480ca8','#3a0ca3','#3f37c9','#4361ee'],
+  forest: ['#2d6a4f','#40916c','#52b788','#74c69d','#95d5b2','#b7e4c7','#1b4332','#081c15','#d8f3dc','#40916c','#52b788','#95d5b2'],
+  mono: ['#f8f9fa','#e9ecef','#dee2e6','#ced4da','#adb5bd','#6c757d','#495057','#343a40','#212529','#868e96','#ced4da','#f1f3f5']
+};
+
+let data = [
+  { label: 'Jan', value: 65 }, { label: 'Feb', value: 42 }, { label: 'Mar', value: 78 },
+  { label: 'Apr', value: 95 }, { label: 'May', value: 120 }, { label: 'Jun', value: 145 },
+  { label: 'Jul', value: 130 }, { label: 'Aug', value: 110 }, { label: 'Sep', value: 88 },
+  { label: 'Oct', value: 72 }, { label: 'Nov', value: 55 }, { label: 'Dec', value: 48 }
+];
+
+let hoveredIdx = -1;
+
+function renderTable() {
+  const tbody = document.getElementById('dataBody');
+  tbody.innerHTML = '';
+  data.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" value="${escapeHtml(row.label)}" aria-label="Label for row ${i+1}" onchange="updateRow(${i},'label',this.value)"></td>
+      <td><input type="number" value="${row.value}" min="0" aria-label="Value for row ${i+1}" onchange="updateRow(${i},'value',parseFloat(this.value)||0)"></td>
+      <td><button class="delete-btn" onclick="deleteRow(${i})" aria-label="Delete row ${i+1}">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateRow(i, field, val) { data[i][field] = val; draw(); }
+function deleteRow(i) { if (data.length > 1) { data.splice(i, 1); renderTable(); draw(); } }
+function addRow() {
+  if (data.length >= 12) return;
+  data.push({ label: 'New', value: 50 });
+  renderTable(); draw();
+}
+
+function loadSample(name) {
+  if (name === 'rainfall') {
+    data = [
+      { label: 'Jan', value: 65 }, { label: 'Feb', value: 42 }, { label: 'Mar', value: 78 },
+      { label: 'Apr', value: 95 }, { label: 'May', value: 120 }, { label: 'Jun', value: 145 },
+      { label: 'Jul', value: 130 }, { label: 'Aug', value: 110 }, { label: 'Sep', value: 88 },
+      { label: 'Oct', value: 72 }, { label: 'Nov', value: 55 }, { label: 'Dec', value: 48 }
+    ];
+  } else {
+    data = [
+      { label: 'N', value: 45 }, { label: 'NNE', value: 12 }, { label: 'NE', value: 23 },
+      { label: 'ENE', value: 8 }, { label: 'E', value: 30 }, { label: 'ESE', value: 18 },
+      { label: 'SE', value: 55 }, { label: 'SSE', value: 40 }, { label: 'S', value: 72 },
+      { label: 'SSW', value: 38 }, { label: 'SW', value: 28 }, { label: 'WSW', value: 15 }
+    ];
+  }
+  renderTable(); draw();
+}
+
+const canvas = document.getElementById('roseCanvas');
+const ctx = canvas.getContext('2d');
+const CX = 240, CY = 240, OUTER_R = 200;
+
+canvas.addEventListener('mousemove', function(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left - CX;
+  const my = e.clientY - rect.top - CY;
+  const angle = Math.atan2(my, mx);
+  const dist = Math.sqrt(mx*mx + my*my);
+  const n = data.length;
+  const segAngle = (Math.PI * 2) / n;
+  const clockwise = document.getElementById('clockwise').checked;
+
+  let a = ((angle % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+  if (!clockwise) a = (Math.PI*2 - a) % (Math.PI*2);
+  const idx = Math.floor(a / segAngle) % n;
+  const innerR = parseInt(document.getElementById('innerRadius').value);
+  const maxVal = Math.max(...data.map(d => d.value));
+  const barR = innerR + (data[idx].value / maxVal) * (OUTER_R - innerR);
+
+  hoveredIdx = dist < barR && dist > innerR ? idx : -1;
+  draw();
+});
+
+canvas.addEventListener('mouseleave', () => { hoveredIdx = -1; draw(); });
+
+function draw() {
+  ctx.clearRect(0, 0, 480, 480);
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 480, 480);
+
+  const n = data.length;
+  const segAngle = (Math.PI * 2) / n;
+  const innerR = parseInt(document.getElementById('innerRadius').value);
+  const clockwise = document.getElementById('clockwise').checked;
+  const scheme = COLOR_SCHEMES[document.getElementById('colorScheme').value];
+  const maxVal = Math.max(...data.map(d => d.value));
+
+  // Grid circles
+  [0.25, 0.5, 0.75, 1.0].forEach(f => {
+    ctx.beginPath();
+    ctx.arc(CX, CY, innerR + f * (OUTER_R - innerR), 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  document.getElementById('innerRadiusVal').textContent = innerR;
+
+  data.forEach((d, i) => {
+    const barR = innerR + (d.value / maxVal) * (OUTER_R - innerR);
+    const startAngle = i * segAngle - Math.PI / 2;
+    const endAngle = startAngle + segAngle;
+    const dir = clockwise ? 1 : -1;
+    const sa = dir > 0 ? startAngle : -startAngle;
+    const ea = dir > 0 ? endAngle : -endAngle;
+
+    ctx.beginPath();
+    ctx.moveTo(CX + innerR * Math.cos(sa), CY + innerR * Math.sin(sa));
+    ctx.arc(CX, CY, barR, sa, ea, dir < 0);
+    ctx.arc(CX, CY, innerR, ea, sa, dir > 0);
+    ctx.closePath();
+
+    const color = scheme[i % scheme.length];
+    ctx.fillStyle = hoveredIdx === i ? 'rgba(255,255,255,0.9)' : color;
+    ctx.globalAlpha = hoveredIdx === i ? 1 : 0.82;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Label
+    const midAngle = sa + (ea - sa) / 2;
+    const labelR = barR + 16;
+    const lx = CX + labelR * Math.cos(midAngle);
+    const ly = CY + labelR * Math.sin(midAngle);
+    ctx.fillStyle = hoveredIdx === i ? '#fff' : '#94a3b8';
+    ctx.font = hoveredIdx === i ? 'bold 13px Segoe UI' : '11px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(d.label, lx, ly);
+
+    if (hoveredIdx === i) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px monospace';
+      const vx = CX + (barR * 0.7) * Math.cos(midAngle);
+      const vy = CY + (barR * 0.7) * Math.sin(midAngle);
+      ctx.fillText(d.value, vx, vy);
+    }
+  });
+}
+
+function buildSVG() {
+  const n = data.length;
+  const segAngle = (Math.PI * 2) / n;
+  const innerR = parseInt(document.getElementById('innerRadius').value);
+  const clockwise = document.getElementById('clockwise').checked;
+  const scheme = COLOR_SCHEMES[document.getElementById('colorScheme').value];
+  const maxVal = Math.max(...data.map(d => d.value));
+  let paths = '';
+
+  data.forEach((d, i) => {
+    const barR = innerR + (d.value / maxVal) * (OUTER_R - innerR);
+    const startAngle = i * segAngle - Math.PI / 2;
+    const endAngle = startAngle + segAngle;
+    const dir = clockwise ? 1 : -1;
+    const sa = dir > 0 ? startAngle : -startAngle;
+    const ea = dir > 0 ? endAngle : -endAngle;
+    const x1 = CX + innerR * Math.cos(sa), y1 = CY + innerR * Math.sin(sa);
+    const x2 = CX + barR * Math.cos(sa), y2 = CY + barR * Math.sin(sa);
+    const x3 = CX + barR * Math.cos(ea), y3 = CY + barR * Math.sin(ea);
+    const x4 = CX + innerR * Math.cos(ea), y4 = CY + innerR * Math.sin(ea);
+    const large = Math.abs(ea - sa) > Math.PI ? 1 : 0;
+    const sw = dir > 0 ? 1 : 0;
+    const color = scheme[i % scheme.length];
+    paths += `<path d="M${x1.toFixed(1)},${y1.toFixed(1)} L${x2.toFixed(1)},${y2.toFixed(1)} A${barR},${barR} 0 ${large},${sw} ${x3.toFixed(1)},${y3.toFixed(1)} L${x4.toFixed(1)},${y4.toFixed(1)} A${innerR},${innerR} 0 ${large},${1-sw} ${x1.toFixed(1)},${y1.toFixed(1)}" fill="${color}" opacity="0.82" stroke="#0f172a" stroke-width="1.5"/>`;
+    const midAngle = sa + (ea - sa) / 2;
+    const labelR = barR + 16;
+    paths += `<text x="${(CX + labelR * Math.cos(midAngle)).toFixed(1)}" y="${(CY + labelR * Math.sin(midAngle)).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="#94a3b8" font-size="11" font-family="Segoe UI">${escapeHtml(d.label)}</text>`;
+  });
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480"><rect width="480" height="480" fill="#0f172a"/>${paths}</svg>`;
+}
+
+function exportSVG() {
+  const svg = buildSVG();
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'rose-chart.svg'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+renderTable();
+draw();
+</script>
+</body>
+</html>
